@@ -1,8 +1,0 @@
-int a;
-        boolean func1(){
-            int index;
-        }
-        boolean func(){
-            int ahihi;
-        }
-        int a;

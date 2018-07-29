@@ -1,4 +1,0 @@
-int foo(int b){
-            int b;
-            return 0;
-        }
