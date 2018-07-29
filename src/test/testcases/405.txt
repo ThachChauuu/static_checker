@@ -1,0 +1,6 @@
+int foo(){
+            int a, a;
+        }
+        int foo1(int a){
+            return 0;
+        }

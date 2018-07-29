@@ -1,0 +1,4 @@
+int foo(float a, boolean b) {
+            boolean b;
+            return 0;
+        }
