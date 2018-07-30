@@ -6,6 +6,7 @@ from AST import *
 from Visitor import *
 from Utils import Utils
 from StaticError import *
+import functools
 
 class MType:
     def __init__(self,partype,rettype):
@@ -27,9 +28,9 @@ class StaticChecker(BaseVisitor,Utils):
     putIntLn = Symbol("putIntLn", MType([IntType()], VoidType()))
     getFloat = Symbol("getFloat", MType([], FloatType()))
     putFloat = Symbol("putFloat", MType([FloatType()], VoidType()))
-    putFloatLn = Symbol("putFloatLn", MType([FloatType], VoidType()))
-    putBool = Symbol("putBool", MType([BoolType], VoidType()))
-    putBoolLn = Symbol("putBoolLn", MType([BoolType], VoidType()))
+    putFloatLn = Symbol("putFloatLn", MType([FloatType()], VoidType()))
+    putBool = Symbol("putBool", MType([BoolType()], VoidType()))
+    putBoolLn = Symbol("putBoolLn", MType([BoolType()], VoidType()))
     putString = Symbol("putString", MType([StringType()], VoidType()))
     putStringLn = Symbol("putStringLn", MType([StringType()], VoidType()))
     putLn = Symbol("putLn", MType([], VoidType()))
@@ -39,18 +40,38 @@ class StaticChecker(BaseVisitor,Utils):
     def __init__(self,ast):
         self.ast = ast
 
+    def find_scope(self, lst):
+        temp = lst[len(lst)-1]
+        if all(isinstance(i, Symbol) for i in temp):
+            return temp
+        else:
+            self.find_scope(temp)
+
+    def lookup1(self, name, lst):
+        for i in reversed(lst):
+            if type(i) is list:
+                pass
+
+    def exitScope(self, lst):
+        for i in lst:
+            if type(i) is list:
+                lst.remove(i)
+        return lst
+
     def lookupId(self, id, lst):
-        si = self.lookup(id, lst[len(lst) - 1], lambda x: x.name)
-        if si is None:
-            so = self.lookup(id, lst[0:len(lst)-1], lambda x: x.name)
-            if so:
-                return so
-            return None
-        return si            
+        for i in lst:
+            if type(i) is list:
+                for x in i:
+                    if id == x.name:
+                        return x
+            else:
+                if id == i.name:
+                    return i
+        return None   
 
     def checkExpr(self, expr, lst):
         if type(expr) is Id:
-            s = self.lookupId(expr, lst)
+            s = self.lookupId(expr.name, lst)
             if s:
                 return s.mtype
             else:
@@ -74,7 +95,7 @@ class StaticChecker(BaseVisitor,Utils):
             rtype = self.checkExpr(expr.body, lst)
             if rtype == BoolType() and expr.op == "!":
                 return BoolType()
-            elif rtype == Inttype() and expr.op == "-":
+            elif rtype == IntType() and expr.op == "-":
                 return IntType()
             elif rtype == FLoatType() and expr.op == "-":
                 return FloatType()
@@ -103,6 +124,12 @@ class StaticChecker(BaseVisitor,Utils):
                     return FloatType()
                 else:
                     raise TypeMismatchInExpression(expr)
+            elif expr.op == "=":
+                if ltype == rtype:
+                    if ltype == VoidType() or ltype == ArrayType() or ltype == ArrayPointerType():
+                        raise TypeMismatchInExpression(expr)
+                    else:
+                        return IntType()
             elif expr.op == "%":
                 if ltype == IntType() and rtype == IntType():
                     return IntType()
@@ -116,11 +143,7 @@ class StaticChecker(BaseVisitor,Utils):
             if s is None or not type(s.mtype) is MType:
                 raise Undeclared(Function(), expr.method.name)
             elif len(s.mtype.partype) != len(ptypes):
-                pass
-                # if stmt
-                    # raise TypeMismatchInStatement(expr)
-                # else:
-                    # raise TypeMismatchInExpression(expr)
+                raise TypeMismatchInStatement(expr)
             else:
                 return s.mtype.rettype
         else:
@@ -136,6 +159,7 @@ class StaticChecker(BaseVisitor,Utils):
             if type(d) is VarDecl:
                 self.visitVarDecl(d, ins_glo_envi)
             else:
+                print(len(ins_glo_envi))
                 self.visitFuncDecl(d, ins_glo_envi)
 
     def visitVarDecl(self, ast, c):
@@ -143,14 +167,12 @@ class StaticChecker(BaseVisitor,Utils):
             raise Redeclared(Variable(), ast.variable.name)
         else:
             c.append(Symbol(ast.variable.name, ast.varType))
-        # self.global_envi = c.copy()
 
     def visitFuncDecl(self, ast, c):        # c is []
         if self.lookup(ast.name.name, c, lambda x: x.name):
             raise Redeclared(Function(), ast.name.name)
         else:
             c.append(Symbol(ast.name.name, MType([p.varType for p in ast.param] if ast.param else [], ast.returnType)))
-        # self.global_envi = c.copy()
         c.insert(len(c), [])
         for p in ast.param:
             if self.lookup(p.variable.name, c[len(c)-1], lambda x: x.name):
@@ -158,9 +180,8 @@ class StaticChecker(BaseVisitor,Utils):
             else:
                 c[len(c)-1].append(Symbol(p.variable.name, p.varType))
         self.visitBlock(ast.body, c)
-        # self.visitBlock(ast.body, c[len(c)-1])
-        # exit scope
-        del c[-1]
+        c = self.exitScope(c)
+        print(len(c))
 
     
     def visitBlock(self, ast, c):       # c is [...[..]]
@@ -178,10 +199,19 @@ class StaticChecker(BaseVisitor,Utils):
                 self.visitContinue(st, c)
             elif type(st) is Dowhile:
                 self.visitDowhile(st, c)
+            elif type(st) is BinaryOp:
+                self.visitBinaryOp(st, c)
+            elif type(st) is UnaryOp:
+                self.visitUnaryOp(st, c)
+            elif type(st) is CallExpr:
+                self.visitCallExpr(st, c)
+            elif type(st) is Id:
+                self.visitId(st, c)
+            elif type(st) is ArrayCell:
+                self.visitArrayCell(st, c)
             elif type(st) is Block:
                 c.insert(len(c), [])     # c is [...[...[...]]]
-                self.visitBlock(st, c)  
-        del c[-1]
+                self.visitBlock(st, c)
 
     def visitIf(self, ast, c):          # c is [...[...]]
         etype = self.checkExpr(ast.expr, c)
@@ -197,7 +227,11 @@ class StaticChecker(BaseVisitor,Utils):
 
 
     def visitFor(self, ast, c):
-        pass
+        e1type = self.checkExpr(ast.expr1, c)
+        e2type = self.checkExpr(ast.expr2, c)
+        e3type = self.checkExpr(ast.expr3, c)
+        if e1type != IntType() or e3type != IntType() or e2type != BoolType():
+            raise TypeMismatchInStatement(ast)
 
     def visitBreak(self, ast, c):
         pass
@@ -206,30 +240,24 @@ class StaticChecker(BaseVisitor,Utils):
         pass
 
     def visitDowhile(self, ast, c):
-        pass             
+        etype = self.checkExpr(ast.exp, c)
+        if etype != BoolType():
+            raise TypeMismatchInStatement(ast)
 
-    # def visitProgram(self,ast, c):    
-    #     return [self.visit(x,c) for x in ast.decl]
+    def visitBinaryOp(self, ast, c):
+        self.checkExpr(ast, c)
 
-    # def visitFuncDecl(self,ast, c): 
-    #     return list(map(lambda x: self.visit(x,(c,True)),ast.body.stmt)) 
-    
+    def visitUnaryOp(self, ast, c):
+        self.checkExpr(ast, c)
 
-    # def visitCallExpr(self, ast, c): 
-    #     at = [self.visit(x,(c[0],False)) for x in ast.param]
-        
-    #     res = self.lookup(ast.method.name,c[0],lambda x: x.name)
-    #     if res is None or not type(res.mtype) is MType:
-    #         raise Undeclared(Function(),ast.method.name)
-    #     elif len(res.mtype.partype) != len(at):
-    #         if c[1]:
-    #             raise TypeMismatchInStatement(ast)
-    #         else:
-    #             raise TypeMismatchInExpression(ast)
-    #     else:
-    #         return res.mtype.rettype
+    def visitCallExpr(self, ast, c):
+        self.checkExpr(ast, c)
 
-    # def visitIntLiteral(self,ast, c): 
-    #     return IntType()
+    def visitId(self, ast, c):
+        self.checkExpr(ast, c)
+
+    def visitArrayCel(self, ast, c):
+        self.checkExpr(ast, c)
+
     
 
